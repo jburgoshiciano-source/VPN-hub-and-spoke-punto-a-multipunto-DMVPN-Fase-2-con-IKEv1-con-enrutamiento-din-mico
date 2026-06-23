@@ -33,6 +33,7 @@ La topología está compuesta por un Hub (IOU3), dos Spokes (IOU2 e IOU4) y un r
 - PC3 → LAN Site B
 
 
+
 ## Direccionamiento
 
 | Dispositivo | Dirección |
