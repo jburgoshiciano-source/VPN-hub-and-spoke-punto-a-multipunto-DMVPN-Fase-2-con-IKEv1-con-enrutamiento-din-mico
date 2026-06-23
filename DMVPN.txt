@@ -1,0 +1,421 @@
+ISP — Router de tránsito (igual para Fase 2 y Fase 3)
+
+ISP(config)# interface e0/0
+ISP(config-if)# description Enlace hacia IOU2
+ISP(config-if)# ip address 200.0.0.1 255.255.255.252
+ISP(config-if)# no shutdown
+ISP(config-if)# exit
+
+ISP(config)# interface e0/1
+ISP(config-if)# description Enlace hacia IOU3 (Hub)
+ISP(config-if)# ip address 200.0.1.1 255.255.255.252
+ISP(config-if)# no shutdown
+ISP(config-if)# exit
+
+ISP(config)# interface e0/2
+ISP(config-if)# description Enlace hacia IOU4
+ISP(config-if)# ip address 200.0.2.1 255.255.255.252
+ISP(config-if)# no shutdown
+ISP(config-if)# exit
+
+! No se necesitan rutas estáticas: las tres subredes WAN ya están
+! directamente conectadas en el ISP — el tráfico entre IOU2, IOU3
+! e IOU4 se enruta automáticamente entre interfaces.
+
+VPCS — Hosts (igual para Fase 2 y Fase 3)
+
+PC1> ip 192.168.1.10 255.255.255.0 192.168.1.1
+PC2> ip 192.168.100.10 255.255.255.0 192.168.100.1
+PC3> ip 192.168.2.10 255.255.255.0 192.168.2.1
+
+
+ESCENARIO 1 — DMVPN Fase 2, IKEv1, EIGRP
+
+Característica clave de Fase 2: el Hub NO hace next-hop-self ni aplica split-horizon en el túnel, para que las rutas EIGRP conserven el next-hop original del spoke origen. Así, cuando un spoke necesita enviar tráfico a otro spoke, EIGRP le indica "el next-hop es el otro spoke", lo que dispara una resolución NHRP y se construye un túnel dinámico spoke-a-spoke.
+
+IOU3 (HUB) — Fase 2
+
+IOU3(config)# interface e0/1
+IOU3(config-if)# description WAN hacia ISP
+IOU3(config-if)# ip address 200.0.1.2 255.255.255.252
+IOU3(config-if)# no shutdown
+IOU3(config-if)# exit
+
+IOU3(config)# interface e0/2
+IOU3(config-if)# description LAN central
+IOU3(config-if)# ip address 192.168.100.1 255.255.255.0
+IOU3(config-if)# no shutdown
+IOU3(config-if)# exit
+
+IOU3(config)# ip route 0.0.0.0 0.0.0.0 200.0.1.1
+
+! IKEv1 (ISAKMP) — Fase 1
+IOU3(config)# crypto isakmp policy 10
+IOU3(config-isakmp)# encr aes 256
+IOU3(config-isakmp)# hash sha256
+IOU3(config-isakmp)# authentication pre-share
+IOU3(config-isakmp)# group 14
+IOU3(config-isakmp)# lifetime 86400
+IOU3(config-isakmp)# exit
+IOU3(config)# crypto isakmp key DMVPN_K3Y address 0.0.0.0 0.0.0.0
+
+! Transform-set e IPsec profile
+IOU3(config)# crypto ipsec transform-set TS_DMVPN esp-aes 256 esp-sha256-hmac
+IOU3(cfg-crypto-trans)# mode transport
+IOU3(cfg-crypto-trans)# exit
+IOU3(config)# crypto ipsec profile DMVPN-PROFILE
+IOU3(ipsec-profile)# set transform-set TS_DMVPN
+IOU3(ipsec-profile)# exit
+
+! Tunnel0 — mGRE
+IOU3(config)# interface Tunnel0
+IOU3(config-if)# description DMVPN Fase 2 - HUB
+IOU3(config-if)# ip address 172.16.0.1 255.255.255.0
+IOU3(config-if)# no ip redirects
+IOU3(config-if)# ip mtu 1400
+IOU3(config-if)# ip nhrp authentication DMVPN
+IOU3(config-if)# ip nhrp map multicast dynamic
+IOU3(config-if)# ip nhrp network-id 100
+IOU3(config-if)# ip nhrp holdtime 300
+IOU3(config-if)# no ip split-horizon eigrp 100
+IOU3(config-if)# no ip next-hop-self eigrp 100
+IOU3(config-if)# tunnel source e0/1
+IOU3(config-if)# tunnel mode gre multipoint
+IOU3(config-if)# tunnel key 100
+IOU3(config-if)# tunnel protection ipsec profile DMVPN-PROFILE
+IOU3(config-if)# no shutdown
+IOU3(config-if)# exit
+
+! EIGRP
+IOU3(config)# router eigrp 100
+IOU3(config-router)# network 172.16.0.0 0.0.0.255
+IOU3(config-router)# network 192.168.100.0 0.0.0.255
+IOU3(config-router)# no auto-summary
+IOU3(config-router)# exit
+
+IOU2 (SPOKE1) — Fase 2
+
+IOU2(config)# interface e0/0
+IOU2(config-if)# description WAN hacia ISP
+IOU2(config-if)# ip address 200.0.0.2 255.255.255.252
+IOU2(config-if)# no shutdown
+IOU2(config-if)# exit
+
+IOU2(config)# interface e0/1
+IOU2(config-if)# description LAN site A
+IOU2(config-if)# ip address 192.168.1.1 255.255.255.0
+IOU2(config-if)# no shutdown
+IOU2(config-if)# exit
+
+IOU2(config)# ip route 0.0.0.0 0.0.0.0 200.0.0.1
+
+IOU2(config)# crypto isakmp policy 10
+IOU2(config-isakmp)# encr aes 256
+IOU2(config-isakmp)# hash sha256
+IOU2(config-isakmp)# authentication pre-share
+IOU2(config-isakmp)# group 14
+IOU2(config-isakmp)# lifetime 86400
+IOU2(config-isakmp)# exit
+IOU2(config)# crypto isakmp key DMVPN_K3Y address 0.0.0.0 0.0.0.0
+
+IOU2(config)# crypto ipsec transform-set TS_DMVPN esp-aes 256 esp-sha256-hmac
+IOU2(cfg-crypto-trans)# mode transport
+IOU2(cfg-crypto-trans)# exit
+IOU2(config)# crypto ipsec profile DMVPN-PROFILE
+IOU2(ipsec-profile)# set transform-set TS_DMVPN
+IOU2(ipsec-profile)# exit
+
+IOU2(config)# interface Tunnel0
+IOU2(config-if)# description DMVPN Fase 2 - SPOKE1
+IOU2(config-if)# ip address 172.16.0.2 255.255.255.0
+IOU2(config-if)# no ip redirects
+IOU2(config-if)# ip mtu 1400
+IOU2(config-if)# ip nhrp authentication DMVPN
+IOU2(config-if)# ip nhrp map 172.16.0.1 200.0.1.2
+IOU2(config-if)# ip nhrp map multicast 200.0.1.2
+IOU2(config-if)# ip nhrp network-id 100
+IOU2(config-if)# ip nhrp holdtime 300
+IOU2(config-if)# ip nhrp nhs 172.16.0.1
+IOU2(config-if)# tunnel source e0/0
+IOU2(config-if)# tunnel mode gre multipoint
+IOU2(config-if)# tunnel key 100
+IOU2(config-if)# tunnel protection ipsec profile DMVPN-PROFILE
+IOU2(config-if)# no shutdown
+IOU2(config-if)# exit
+
+IOU2(config)# router eigrp 100
+IOU2(config-router)# network 172.16.0.0 0.0.0.255
+IOU2(config-router)# network 192.168.1.0 0.0.0.255
+IOU2(config-router)# no auto-summary
+IOU2(config-router)# exit
+
+IOU4 (SPOKE2) — Fase 2
+
+IOU4(config)# interface e0/2
+IOU4(config-if)# description WAN hacia ISP
+IOU4(config-if)# ip address 200.0.2.2 255.255.255.252
+IOU4(config-if)# no shutdown
+IOU4(config-if)# exit
+
+IOU4(config)# interface e0/3
+IOU4(config-if)# description LAN site B
+IOU4(config-if)# ip address 192.168.2.1 255.255.255.0
+IOU4(config-if)# no shutdown
+IOU4(config-if)# exit
+
+IOU4(config)# ip route 0.0.0.0 0.0.0.0 200.0.2.1
+
+IOU4(config)# crypto isakmp policy 10
+IOU4(config-isakmp)# encr aes 256
+IOU4(config-isakmp)# hash sha256
+IOU4(config-isakmp)# authentication pre-share
+IOU4(config-isakmp)# group 14
+IOU4(config-isakmp)# lifetime 86400
+IOU4(config-isakmp)# exit
+IOU4(config)# crypto isakmp key DMVPN_K3Y address 0.0.0.0 0.0.0.0
+
+IOU4(config)# crypto ipsec transform-set TS_DMVPN esp-aes 256 esp-sha256-hmac
+IOU4(cfg-crypto-trans)# mode transport
+IOU4(cfg-crypto-trans)# exit
+IOU4(config)# crypto ipsec profile DMVPN-PROFILE
+IOU4(ipsec-profile)# set transform-set TS_DMVPN
+IOU4(ipsec-profile)# exit
+
+IOU4(config)# interface Tunnel0
+IOU4(config-if)# description DMVPN Fase 2 - SPOKE2
+IOU4(config-if)# ip address 172.16.0.3 255.255.255.0
+IOU4(config-if)# no ip redirects
+IOU4(config-if)# ip mtu 1400
+IOU4(config-if)# ip nhrp authentication DMVPN
+IOU4(config-if)# ip nhrp map 172.16.0.1 200.0.1.2
+IOU4(config-if)# ip nhrp map multicast 200.0.1.2
+IOU4(config-if)# ip nhrp network-id 100
+IOU4(config-if)# ip nhrp holdtime 300
+IOU4(config-if)# ip nhrp nhs 172.16.0.1
+IOU4(config-if)# tunnel source e0/2
+IOU4(config-if)# tunnel mode gre multipoint
+IOU4(config-if)# tunnel key 100
+IOU4(config-if)# tunnel protection ipsec profile DMVPN-PROFILE
+IOU4(config-if)# no shutdown
+IOU4(config-if)# exit
+
+IOU4(config)# router eigrp 100
+IOU4(config-router)# network 172.16.0.0 0.0.0.255
+IOU4(config-router)# network 192.168.2.0 0.0.0.255
+IOU4(config-router)# no auto-summary
+IOU4(config-router)# exit
+
+
+
+
+
+IOU3 (HUB) — Fase 3
+
+IOU3(config)# interface e0/1
+IOU3(config-if)# description WAN hacia ISP
+IOU3(config-if)# ip address 200.0.1.2 255.255.255.252
+IOU3(config-if)# no shutdown
+IOU3(config-if)# exit
+
+IOU3(config)# interface e0/2
+IOU3(config-if)# description LAN central
+IOU3(config-if)# ip address 192.168.100.1 255.255.255.0
+IOU3(config-if)# no shutdown
+IOU3(config-if)# exit
+
+IOU3(config)# ip route 0.0.0.0 0.0.0.0 200.0.1.1
+
+! IKEv2
+IOU3(config)# crypto ikev2 proposal DMVPN-PROP
+IOU3(config-ikev2-proposal)# encryption aes-cbc-256
+IOU3(config-ikev2-proposal)# integrity sha256
+IOU3(config-ikev2-proposal)# group 14
+IOU3(config-ikev2-proposal)# exit
+IOU3(config)# crypto ikev2 policy DMVPN-POL
+IOU3(config-ikev2-policy)# proposal DMVPN-PROP
+IOU3(config-ikev2-policy)# exit
+IOU3(config)# crypto ikev2 keyring DMVPN-KEYRING
+IOU3(config-ikev2-keyring)# peer ANY
+IOU3(config-ikev2-keyring-peer)# address 0.0.0.0 0.0.0.0
+IOU3(config-ikev2-keyring-peer)# pre-shared-key DMVPN_K3Y
+IOU3(config-ikev2-keyring-peer)# exit
+IOU3(config-ikev2-keyring)# exit
+IOU3(config)# crypto ikev2 profile DMVPN-IKEV2-PROFILE
+IOU3(config-ikev2-profile)# match identity remote address 0.0.0.0
+IOU3(config-ikev2-profile)# authentication remote pre-share
+IOU3(config-ikev2-profile)# authentication local pre-share
+IOU3(config-ikev2-profile)# keyring local DMVPN-KEYRING
+IOU3(config-ikev2-profile)# exit
+
+! Transform-set e IPsec profile (referencia al perfil IKEv2)
+IOU3(config)# crypto ipsec transform-set TS_DMVPN_V2 esp-aes 256 esp-sha256-hmac
+IOU3(cfg-crypto-trans)# mode transport
+IOU3(cfg-crypto-trans)# exit
+IOU3(config)# crypto ipsec profile DMVPN-PROFILE-V2
+IOU3(ipsec-profile)# set transform-set TS_DMVPN_V2
+IOU3(ipsec-profile)# set ikev2-profile DMVPN-IKEV2-PROFILE
+IOU3(ipsec-profile)# exit
+
+! Tunnel0 — mGRE Fase 3
+IOU3(config)# interface Tunnel0
+IOU3(config-if)# description DMVPN Fase 3 - HUB
+IOU3(config-if)# ip address 172.16.0.1 255.255.255.0
+IOU3(config-if)# no ip redirects
+IOU3(config-if)# ip mtu 1400
+IOU3(config-if)# ip nhrp authentication DMVPN
+IOU3(config-if)# ip nhrp map multicast dynamic
+IOU3(config-if)# ip nhrp network-id 200
+IOU3(config-if)# ip nhrp holdtime 300
+IOU3(config-if)# ip nhrp redirect
+IOU3(config-if)# tunnel source e0/1
+IOU3(config-if)# tunnel mode gre multipoint
+IOU3(config-if)# tunnel key 200
+IOU3(config-if)# tunnel protection ipsec profile DMVPN-PROFILE-V2
+IOU3(config-if)# no shutdown
+IOU3(config-if)# exit
+
+IOU3(config)# router eigrp 200
+IOU3(config-router)# network 172.16.0.0 0.0.0.255
+IOU3(config-router)# network 192.168.100.0 0.0.0.255
+IOU3(config-router)# no auto-summary
+IOU3(config-router)# exit
+
+IOU2 (SPOKE1) — Fase 3
+
+IOU2(config)# interface e0/0
+IOU2(config-if)# description WAN hacia ISP
+IOU2(config-if)# ip address 200.0.0.2 255.255.255.252
+IOU2(config-if)# no shutdown
+IOU2(config-if)# exit
+
+IOU2(config)# interface e0/1
+IOU2(config-if)# description LAN site A
+IOU2(config-if)# ip address 192.168.1.1 255.255.255.0
+IOU2(config-if)# no shutdown
+IOU2(config-if)# exit
+
+IOU2(config)# ip route 0.0.0.0 0.0.0.0 200.0.0.1
+
+IOU2(config)# crypto ikev2 proposal DMVPN-PROP
+IOU2(config-ikev2-proposal)# encryption aes-cbc-256
+IOU2(config-ikev2-proposal)# integrity sha256
+IOU2(config-ikev2-proposal)# group 14
+IOU2(config-ikev2-proposal)# exit
+IOU2(config)# crypto ikev2 policy DMVPN-POL
+IOU2(config-ikev2-policy)# proposal DMVPN-PROP
+IOU2(config-ikev2-policy)# exit
+IOU2(config)# crypto ikev2 keyring DMVPN-KEYRING
+IOU2(config-ikev2-keyring)# peer ANY
+IOU2(config-ikev2-keyring-peer)# address 0.0.0.0 0.0.0.0
+IOU2(config-ikev2-keyring-peer)# pre-shared-key DMVPN_K3Y
+IOU2(config-ikev2-keyring-peer)# exit
+IOU2(config-ikev2-keyring)# exit
+IOU2(config)# crypto ikev2 profile DMVPN-IKEV2-PROFILE
+IOU2(config-ikev2-profile)# match identity remote address 0.0.0.0
+IOU2(config-ikev2-profile)# authentication remote pre-share
+IOU2(config-ikev2-profile)# authentication local pre-share
+IOU2(config-ikev2-profile)# keyring local DMVPN-KEYRING
+IOU2(config-ikev2-profile)# exit
+
+IOU2(config)# crypto ipsec transform-set TS_DMVPN_V2 esp-aes 256 esp-sha256-hmac
+IOU2(cfg-crypto-trans)# mode transport
+IOU2(cfg-crypto-trans)# exit
+IOU2(config)# crypto ipsec profile DMVPN-PROFILE-V2
+IOU2(ipsec-profile)# set transform-set TS_DMVPN_V2
+IOU2(ipsec-profile)# set ikev2-profile DMVPN-IKEV2-PROFILE
+IOU2(ipsec-profile)# exit
+
+IOU2(config)# interface Tunnel0
+IOU2(config-if)# description DMVPN Fase 3 - SPOKE1
+IOU2(config-if)# ip address 172.16.0.2 255.255.255.0
+IOU2(config-if)# no ip redirects
+IOU2(config-if)# ip mtu 1400
+IOU2(config-if)# ip nhrp authentication DMVPN
+IOU2(config-if)# ip nhrp map 172.16.0.1 200.0.1.2
+IOU2(config-if)# ip nhrp map multicast 200.0.1.2
+IOU2(config-if)# ip nhrp network-id 200
+IOU2(config-if)# ip nhrp holdtime 300
+IOU2(config-if)# ip nhrp nhs 172.16.0.1
+IOU2(config-if)# ip nhrp shortcut
+IOU2(config-if)# tunnel source e0/0
+IOU2(config-if)# tunnel mode gre multipoint
+IOU2(config-if)# tunnel key 200
+IOU2(config-if)# tunnel protection ipsec profile DMVPN-PROFILE-V2
+IOU2(config-if)# no shutdown
+IOU2(config-if)# exit
+
+IOU2(config)# router eigrp 200
+IOU2(config-router)# network 172.16.0.0 0.0.0.255
+IOU2(config-router)# network 192.168.1.0 0.0.0.255
+IOU2(config-router)# no auto-summary
+IOU2(config-router)# exit
+
+IOU4 (SPOKE2) — Fase 3
+
+IOU4(config)# interface e0/2
+IOU4(config-if)# description WAN hacia ISP
+IOU4(config-if)# ip address 200.0.2.2 255.255.255.252
+IOU4(config-if)# no shutdown
+IOU4(config-if)# exit
+
+IOU4(config)# interface e0/3
+IOU4(config-if)# description LAN site B
+IOU4(config-if)# ip address 192.168.2.1 255.255.255.0
+IOU4(config-if)# no shutdown
+IOU4(config-if)# exit
+
+IOU4(config)# ip route 0.0.0.0 0.0.0.0 200.0.2.1
+
+IOU4(config)# crypto ikev2 proposal DMVPN-PROP
+IOU4(config-ikev2-proposal)# encryption aes-cbc-256
+IOU4(config-ikev2-proposal)# integrity sha256
+IOU4(config-ikev2-proposal)# group 14
+IOU4(config-ikev2-proposal)# exit
+IOU4(config)# crypto ikev2 policy DMVPN-POL
+IOU4(config-ikev2-policy)# proposal DMVPN-PROP
+IOU4(config-ikev2-policy)# exit
+IOU4(config)# crypto ikev2 keyring DMVPN-KEYRING
+IOU4(config-ikev2-keyring)# peer ANY
+IOU4(config-ikev2-keyring-peer)# address 0.0.0.0 0.0.0.0
+IOU4(config-ikev2-keyring-peer)# pre-shared-key DMVPN_K3Y
+IOU4(config-ikev2-keyring-peer)# exit
+IOU4(config-ikev2-keyring)# exit
+IOU4(config)# crypto ikev2 profile DMVPN-IKEV2-PROFILE
+IOU4(config-ikev2-profile)# match identity remote address 0.0.0.0
+IOU4(config-ikev2-profile)# authentication remote pre-share
+IOU4(config-ikev2-profile)# authentication local pre-share
+IOU4(config-ikev2-profile)# keyring local DMVPN-KEYRING
+IOU4(config-ikev2-profile)# exit
+
+IOU4(config)# crypto ipsec transform-set TS_DMVPN_V2 esp-aes 256 esp-sha256-hmac
+IOU4(cfg-crypto-trans)# mode transport
+IOU4(cfg-crypto-trans)# exit
+IOU4(config)# crypto ipsec profile DMVPN-PROFILE-V2
+IOU4(ipsec-profile)# set transform-set TS_DMVPN_V2
+IOU4(ipsec-profile)# set ikev2-profile DMVPN-IKEV2-PROFILE
+IOU4(ipsec-profile)# exit
+
+IOU4(config)# interface Tunnel0
+IOU4(config-if)# description DMVPN Fase 3 - SPOKE2
+IOU4(config-if)# ip address 172.16.0.3 255.255.255.0
+IOU4(config-if)# no ip redirects
+IOU4(config-if)# ip mtu 1400
+IOU4(config-if)# ip nhrp authentication DMVPN
+IOU4(config-if)# ip nhrp map 172.16.0.1 200.0.1.2
+IOU4(config-if)# ip nhrp map multicast 200.0.1.2
+IOU4(config-if)# ip nhrp network-id 200
+IOU4(config-if)# ip nhrp holdtime 300
+IOU4(config-if)# ip nhrp nhs 172.16.0.1
+IOU4(config-if)# ip nhrp shortcut
+IOU4(config-if)# tunnel source e0/2
+IOU4(config-if)# tunnel mode gre multipoint
+IOU4(config-if)# tunnel key 200
+IOU4(config-if)# tunnel protection ipsec profile DMVPN-PROFILE-V2
+IOU4(config-if)# no shutdown
+IOU4(config-if)# exit
+
+IOU4(config)# router eigrp 200
+IOU4(config-router)# network 172.16.0.0 0.0.0.255
+IOU4(config-router)# network 192.168.2.0 0.0.0.255
+IOU4(config-router)# no auto-summary
+IOU4(config-router)# exit
