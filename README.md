@@ -32,7 +32,9 @@ La topología está compuesta por un Hub (IOU3), dos Spokes (IOU2 e IOU4) y un r
 - PC2 → LAN Hub
 - PC3 → LAN Site B
 
-![Topología VPN]https://github.com/jburgoshiciano-source/VPN-hub-and-spoke-punto-a-multipunto-DMVPN-Fase-2-con-IKEv1-con-enrutamiento-din-mico/blob/main/DMVPN.png
+## 🖼️ Topología
+
+![Topología VPN]
 
 ## Direccionamiento
 
